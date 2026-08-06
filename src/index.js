@@ -538,6 +538,7 @@ async function tryHandleTorrentInput({ rewriteCurrentLoad = false } = {}) {
 
     const selectedFile = getSelectedVideoFile();
     console.log(`[torrent-stream] using stream URL: ${streamURL}`);
+    configurePreferredTracks();
     if (rewriteCurrentLoad) {
       // on_load is still paused here. Rewriting its source avoids starting a
       // nested loadfile command that races with the original .torrent load.
@@ -864,6 +865,7 @@ async function switchToVideoFile(fileIndex) {
     const selectedFile = getSelectedVideoFile();
     // During playback, stream-open-filename alone may not reload current media.
     // Force replacement so selected torrent file is actually switched.
+    configurePreferredTracks();
     mpv.command("loadfile", [streamURL, "replace"]);
     mpv.set("pause", "no");
     mpv.set("vid", "auto");
@@ -1140,6 +1142,26 @@ function buildTitle(source, selectedFile = null) {
   }
   const parts = source.split("/");
   return `Torrent Stream: ${parts[parts.length - 1] || source}`;
+}
+
+function configurePreferredTracks() {
+  const options = [
+    ["file-local-options/alang", "eng,en"],
+    ["file-local-options/slang", "eng,en"],
+    ["file-local-options/track-auto-selection", "yes"],
+    ["file-local-options/subs-with-matching-audio", "yes"],
+    ["file-local-options/aid", "auto"],
+    ["file-local-options/sid", "auto"],
+    ["file-local-options/sub-visibility", "yes"],
+  ];
+
+  for (const [name, value] of options) {
+    try {
+      mpv.set(name, value);
+    } catch (error) {
+      console.error(`[torrent-stream] failed to set ${name}: ${formatError(error)}`);
+    }
+  }
 }
 
 function sh(input) {

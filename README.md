@@ -48,6 +48,8 @@ Restart IINA after linking.
 ## Notes
 
 - Plugin stores temporary torrent data in an isolated `/tmp/iina-torrent-stream-<session>-data` directory.
+- Torrent playback prefers English (`eng`/`en`) audio and English subtitles. If
+  an English track is unavailable, mpv falls back to an available track.
 - If disk space is low, stream start can fail. Use `Stop Torrent Stream` to clear temporary cache.
 
 ## Menu actions
