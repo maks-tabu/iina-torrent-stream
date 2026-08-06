@@ -12,7 +12,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Validate release version
         run: |
@@ -24,6 +24,9 @@ jobs:
           version="$(jq -r '.version' Info.json)"
           zip -r "iina-torrent-stream-${version}.iinaplgz" . \
             -x '.git/*' '.github/*' 'node_modules/*' '*.iinaplgz' '.DS_Store'
+
+      - name: Update IINA metadata branch
+        run: git push origin "HEAD:refs/heads/master"
 
       - name: Create GitHub release
         env:
