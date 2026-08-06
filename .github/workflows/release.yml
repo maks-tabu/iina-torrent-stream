@@ -26,7 +26,7 @@ jobs:
             -x '.git/*' '.github/*' 'node_modules/*' '*.iinaplgz' '.DS_Store'
 
       - name: Update IINA metadata branch
-        run: git push origin "HEAD:refs/heads/master"
+        run: git push --force origin "HEAD:refs/heads/master"
 
       - name: Create GitHub release
         env:
