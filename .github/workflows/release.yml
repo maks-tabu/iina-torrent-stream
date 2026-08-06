@@ -1,0 +1,36 @@
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release version
+        run: |
+          version="$(jq -r '.version' Info.json)"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+
+      - name: Package plugin
+        run: |
+          version="$(jq -r '.version' Info.json)"
+          zip -r "iina-torrent-stream-${version}.iinaplgz" . \
+            -x '.git/*' '.github/*' 'node_modules/*' '*.iinaplgz' '.DS_Store'
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(jq -r '.version' Info.json)"
+          gh release create "${GITHUB_REF_NAME}" \
+            "iina-torrent-stream-${version}.iinaplgz" \
+            --title "Torrent Stream ${version}" \
+            --generate-notes

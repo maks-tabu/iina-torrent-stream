@@ -1,0 +1,18 @@
+{
+  "name": "Torrent Stream",
+  "identifier": "io.github.tabu.iina-torrent-stream",
+  "version": "0.1.2",
+  "description": "Stream video from .torrent files and magnet links in IINA using webtorrent.",
+  "author": {
+    "name": "maks-tabu",
+    "url": "https://github.com/maks-tabu"
+  },
+  "ghVersion": 1,
+  "ghRepo": "maks-tabu/iina-torrent-stream",
+  "entry": "src/index.js",
+  "permissions": [
+    "show-osd",
+    "show-alert",
+    "file-system"
+  ]
+}

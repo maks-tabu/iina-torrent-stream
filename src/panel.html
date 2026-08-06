@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Torrent Stream Panel</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #111318;
+      --surface: #1b1f28;
+      --surface-2: #252b36;
+      --text: #e8ebf3;
+      --muted: #aeb6c6;
+      --accent: #4aa3ff;
+      --border: #313949;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .wrap {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      min-height: 100vh;
+      grid-template-rows: auto auto auto 1fr;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    .list {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      overflow: auto;
+      min-height: 120px;
+      max-height: 62vh;
+      padding: 6px;
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+
+    .item {
+      width: 100%;
+      text-align: left;
+      background: var(--surface-2);
+      border: 1px solid transparent;
+      padding: 8px 10px;
+    }
+
+    .item.selected {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+    }
+
+    .line {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .line.name {
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .line.meta {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .empty {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Torrent Stream</h1>
+    <div id="status" class="status">Waiting for torrent...</div>
+    <div class="actions">
+      <button id="refresh-btn" type="button">Refresh List</button>
+      <button id="prev-btn" type="button">Previous</button>
+      <button id="next-btn" type="button">Next</button>
+    </div>
+    <div id="list" class="list"></div>
+  </div>
+
+  <script>
+    const state = {
+      hasSource: false,
+      selectedIndex: null,
+      loading: false,
+      files: [],
+    };
+
+    function send(message, payload) {
+      if (window.iina && typeof iina.postMessage === "function") {
+        iina.postMessage(message, payload || {});
+      }
+    }
+
+    function short(value, max) {
+      const text = String(value || "");
+      if (text.length <= max) return text;
+      return text.slice(0, max - 1) + "…";
+    }
+
+    function render() {
+      const status = document.getElementById("status");
+      const list = document.getElementById("list");
+
+      if (!state.hasSource) {
+        status.textContent = "Open a .torrent or magnet link in IINA.";
+      } else if (state.loading) {
+        status.textContent = "Loading torrent stream...";
+      } else if (!state.files.length) {
+        status.textContent = "Torrent opened. Files are not detected yet.";
+      } else {
+        status.textContent = "Files: " + state.files.length + (state.selectedIndex !== null ? " | Selected: #" + state.selectedIndex : "");
+      }
+
+      list.innerHTML = "";
+      if (!state.files.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No files yet. Click Refresh List.";
+        list.appendChild(empty);
+        return;
+      }
+
+      state.files.forEach((file) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "item" + (file.selected ? " selected" : "");
+        btn.addEventListener("click", () => {
+          send("panel-select-file", { index: file.index });
+        });
+
+        const name = document.createElement("span");
+        name.className = "line name";
+        name.textContent = "#" + file.index + " " + short(file.name || file.fullName, 72);
+
+        const meta = document.createElement("span");
+        meta.className = "line meta";
+        meta.textContent = file.sizeLabel || "";
+
+        btn.appendChild(name);
+        btn.appendChild(meta);
+        list.appendChild(btn);
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("refresh-btn").addEventListener("click", () => send("panel-refresh"));
+      document.getElementById("prev-btn").addEventListener("click", () => send("panel-prev"));
+      document.getElementById("next-btn").addEventListener("click", () => send("panel-next"));
+
+      if (window.iina && typeof iina.onMessage === "function") {
+        iina.onMessage("panel-state", (payload) => {
+          Object.assign(state, payload || {});
+          if (!Array.isArray(state.files)) state.files = [];
+          render();
+        });
+      }
+
+      render();
+      send("panel-ready");
+      send("panel-request-state");
+    });
+  </script>
+</body>
+</html>
