@@ -32,7 +32,7 @@
       display: grid;
       gap: 10px;
       min-height: 100vh;
-      grid-template-rows: auto auto auto 1fr;
+      grid-template-rows: auto auto auto auto 1fr;
     }
 
     h1 {
@@ -71,6 +71,21 @@
     }
 
     button:hover {
+      border-color: var(--accent);
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    input:focus {
       border-color: var(--accent);
     }
 
@@ -134,6 +149,7 @@
       <button id="prev-btn" type="button">Previous</button>
       <button id="next-btn" type="button">Next</button>
     </div>
+    <input id="filter-input" type="search" placeholder="Find episode, e.g. s01e05">
     <div id="list" class="list"></div>
   </div>
 
@@ -142,7 +158,9 @@
       hasSource: false,
       selectedIndex: null,
       loading: false,
+      selectionPending: false,
       files: [],
+      filter: "",
     };
 
     function send(message, payload) {
@@ -163,6 +181,8 @@
 
       if (!state.hasSource) {
         status.textContent = "Open a .torrent or magnet link in IINA.";
+      } else if (state.selectionPending) {
+        status.textContent = "Select an episode to start playback.";
       } else if (state.loading) {
         status.textContent = "Loading torrent stream...";
       } else if (!state.files.length) {
@@ -180,7 +200,13 @@
         return;
       }
 
-      state.files.forEach((file) => {
+      const query = state.filter.trim().toLowerCase();
+      const visibleFiles = state.files.filter((file) => {
+        if (!query) return true;
+        return String(file.fullName || file.name || "").toLowerCase().includes(query);
+      });
+
+      visibleFiles.forEach((file) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "item" + (file.selected ? " selected" : "");
@@ -190,7 +216,7 @@
 
         const name = document.createElement("span");
         name.className = "line name";
-        name.textContent = "#" + file.index + " " + short(file.name || file.fullName, 72);
+        name.textContent = short(file.fullName || file.name, 88);
 
         const meta = document.createElement("span");
         meta.className = "line meta";
@@ -206,6 +232,10 @@
       document.getElementById("refresh-btn").addEventListener("click", () => send("panel-refresh"));
       document.getElementById("prev-btn").addEventListener("click", () => send("panel-prev"));
       document.getElementById("next-btn").addEventListener("click", () => send("panel-next"));
+      document.getElementById("filter-input").addEventListener("input", (event) => {
+        state.filter = event.target.value || "";
+        render();
+      });
 
       if (window.iina && typeof iina.onMessage === "function") {
         iina.onMessage("panel-state", (payload) => {

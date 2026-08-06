@@ -18,7 +18,7 @@ const STREAM_HELPER_VIRTUAL_PATH = "@tmp/stream-server.mjs";
 const STREAM_HELPER_SOURCE = require("../lib/stream-server-source.js");
 file.write(STREAM_HELPER_VIRTUAL_PATH, STREAM_HELPER_SOURCE);
 const STREAM_HELPER_PATH = utils.resolvePath(STREAM_HELPER_VIRTUAL_PATH);
-const STARTUP_TIMEOUT_MS = 60000;
+const STARTUP_TIMEOUT_MS = 180000;
 const POLL_INTERVAL_MS = 500;
 const STREAM_READINESS_TIMEOUT_MS = 45000;
 const STREAM_READINESS_EXTRA_TIMEOUT_MS = 90000;
@@ -63,6 +63,9 @@ let lastDiskFullAutoCleanupAt = 0;
 let startupStatusText = "";
 let startupPulseIndex = 0;
 let startupTimer = null;
+let panelInitialized = false;
+let initialSelectionPending = false;
+let initialSelectionResolver = null;
 
 console.log("[torrent-stream] plugin loaded");
 
@@ -124,7 +127,7 @@ function renderMenu() {
             core.osd("No video files detected yet");
           }
         } catch (error) {
-          core.alert(`Failed to refresh file list:\n${formatError(error)}`);
+          showError(`Failed to refresh file list:\n${formatError(error)}`);
         }
       }),
     );
@@ -201,6 +204,7 @@ function setupPanel() {
   try {
     standaloneWindow.loadFile("src/panel.html");
     standaloneWindow.setProperty({ title: "Torrent Stream Panel" });
+    panelInitialized = true;
   } catch (error) {
     console.error(`[torrent-stream] panel init failed: ${formatError(error)}`);
     return;
@@ -223,7 +227,7 @@ function setupPanel() {
     try {
       await refreshTorrentFileList(currentTorrentSource);
     } catch (error) {
-      core.alert(`Failed to refresh file list:\n${formatError(error)}`);
+      showError(`Failed to refresh file list:\n${formatError(error)}`);
     }
     postPanelState();
   });
@@ -241,6 +245,10 @@ function setupPanel() {
   standaloneWindow.onMessage("panel-select-file", async (payload) => {
     const index = Number(payload && payload.index);
     if (!Number.isInteger(index)) {
+      return;
+    }
+    if (initialSelectionPending) {
+      finishInitialSelection(index);
       return;
     }
     await switchToVideoFile(index);
@@ -273,15 +281,51 @@ function postPanelState() {
     hasSource: Boolean(currentTorrentSource),
     selectedIndex: selectedVideoIndex,
     loading: loadInProgress,
+    selectionPending: initialSelectionPending,
     files,
   });
+}
+
+async function requestInitialVideoSelection() {
+  if (currentVideoFiles.length <= 1 || !panelInitialized) {
+    return selectedVideoIndex;
+  }
+
+  selectedVideoIndex = null;
+  initialSelectionPending = true;
+  const selection = new Promise((resolve) => {
+    initialSelectionResolver = resolve;
+  });
+  renderMenu();
+  openPanel();
+  core.osd("Torrent: select an episode to start");
+  return await selection;
+}
+
+function finishInitialSelection(fileIndex = null) {
+  const validIndex = Number.isInteger(fileIndex) &&
+    currentVideoFiles.some((file) => file.index === fileIndex)
+    ? fileIndex
+    : null;
+  selectedVideoIndex = validIndex;
+  initialSelectionPending = false;
+  const resolve = initialSelectionResolver;
+  initialSelectionResolver = null;
+  renderMenu();
+  postPanelState();
+  if (validIndex !== null && standaloneWindow && typeof standaloneWindow.close === "function") {
+    standaloneWindow.close();
+  }
+  if (resolve) {
+    resolve(validIndex);
+  }
 }
 
 function setupHooks() {
   mpv.addHook("on_load", 10, async (next) => {
     try {
       core.osd("Torrent: detecting input...");
-      await tryHandleTorrentInput();
+      await tryHandleTorrentInput({ rewriteCurrentLoad: true });
     } catch (error) {
       console.error(`[torrent-stream] on_load error: ${error}`);
     } finally {
@@ -291,7 +335,7 @@ function setupHooks() {
 
   mpv.addHook("on_load_fail", 10, async (next) => {
     try {
-      await tryHandleTorrentInput();
+      await tryHandleTorrentInput({ rewriteCurrentLoad: false });
     } catch (error) {
       console.error(`[torrent-stream] on_load_fail error: ${error}`);
     } finally {
@@ -395,7 +439,7 @@ function resetStreamSessionState(clearContext = false) {
   }
   currentTorrentSource = "";
   currentVideoFiles = [];
-  selectedVideoIndex = null;
+  finishInitialSelection();
   renderMenu();
   postPanelState();
 }
@@ -431,7 +475,7 @@ async function maybeAutoCleanupDiskFull(errorText = "") {
   }
 }
 
-async function tryHandleTorrentInput() {
+async function tryHandleTorrentInput({ rewriteCurrentLoad = false } = {}) {
   if (loadInProgress) {
     return;
   }
@@ -452,23 +496,29 @@ async function tryHandleTorrentInput() {
     webtorrentBin = await resolveWebTorrentBinary();
     if (!webtorrentBin) {
       stopStartupOSD();
-      core.alert("webtorrent is not installed.\nInstall: npm i -g webtorrent-cli");
+      showError("webtorrent is not installed.\nInstall: npm i -g webtorrent-cli");
       return;
     }
     nodeBin = await resolveNodeBinary();
     if (!nodeBin) {
       stopStartupOSD();
-      core.alert("node is not available for IINA plugin process.\nInstall Node.js and restart IINA.");
+      showError("node is not available for IINA plugin process.\nInstall Node.js and restart IINA.");
       return;
     }
 
     await refreshTorrentFileList(torrentSource);
+    if (currentVideoFiles.length > 1) {
+      const initialSelection = await requestInitialVideoSelection();
+      if (!Number.isInteger(initialSelection)) {
+        return;
+      }
+    }
     setStartupOSDStatus("Torrent: starting stream...");
     const streamURL = await startCurrentSelectionWithRecovery();
     if (!streamURL) {
       stopStartupOSD();
       const message = await buildStreamStartupFailureMessage("Cannot start torrent stream.");
-      core.alert(message);
+      showError(message);
       return;
     }
     setStartupOSDStatus("Torrent: waiting for media...");
@@ -481,14 +531,20 @@ async function tryHandleTorrentInput() {
         const message = await buildStreamStartupFailureMessage(
           "Torrent stream URL is up, but first media bytes are still unavailable.",
         );
-        core.alert(message);
+        showError(message);
         return;
       }
     }
 
     const selectedFile = getSelectedVideoFile();
     console.log(`[torrent-stream] using stream URL: ${streamURL}`);
-    mpv.command("loadfile", [streamURL, "replace"]);
+    if (rewriteCurrentLoad) {
+      // on_load is still paused here. Rewriting its source avoids starting a
+      // nested loadfile command that races with the original .torrent load.
+      mpv.set("stream-open-filename", streamURL);
+    } else {
+      mpv.command("loadfile", [streamURL, "replace"]);
+    }
     mpv.set("pause", "no");
     mpv.set("vid", "auto");
     mpv.set("hwdec", "no");
@@ -504,7 +560,7 @@ async function tryHandleTorrentInput() {
     console.error(`[torrent-stream] handle error: ${msg}`);
     await maybeAutoCleanupDiskFull(msg);
     const message = await buildStreamStartupFailureMessage(`Torrent plugin error: ${msg}`);
-    core.alert(message);
+    showError(message);
   } finally {
     if (!connected) {
       await stopCurrentStream(true);
@@ -662,6 +718,13 @@ async function stopCurrentStream(clearData = false) {
 async function waitForStreamURL(timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    const directURL = await readStreamURL();
+    if (directURL) {
+      const log = await readStreamLog();
+      applyStreamMetadata(log);
+      return directURL;
+    }
+
     const log = await readStreamLog();
     const url = extractLocalURL(log);
     if (url) {
@@ -678,6 +741,18 @@ async function waitForStreamURL(timeoutMs) {
     await sleep(POLL_INTERVAL_MS);
   }
   return "";
+}
+
+async function readStreamURL() {
+  const cmd =
+    `if [ -f ${sh(STREAM_LOG_PATH)} ]; then ` +
+    `grep -F -- '[torrent-stream] URL: ' ${sh(STREAM_LOG_PATH)} | ` +
+    `tail -n 1 | cut -d' ' -f3-; fi`;
+  const res = await utils.exec("/bin/bash", ["-lc", cmd]);
+  if (res.status !== 0) {
+    return "";
+  }
+  return extractLocalURL(res.stdout || "");
 }
 
 function startStartupOSD(status) {
@@ -782,7 +857,7 @@ async function switchToVideoFile(fileIndex) {
     const streamURL = await startCurrentSelectionWithRecovery();
     if (!streamURL) {
       const message = await buildStreamStartupFailureMessage("Cannot switch to selected torrent file.");
-      core.alert(message);
+      showError(message);
       return;
     }
 
@@ -801,7 +876,7 @@ async function switchToVideoFile(fileIndex) {
   } catch (error) {
     await maybeAutoCleanupDiskFull(formatError(error));
     const message = await buildStreamStartupFailureMessage(`Failed to switch torrent file: ${formatError(error)}`);
-    core.alert(message);
+    showError(message);
   } finally {
     if (!switched) {
       await stopCurrentStream(true);
@@ -1127,6 +1202,12 @@ function formatError(error) {
     return String(error.message);
   }
   return String(error);
+}
+
+function showError(message) {
+  const text = String(message || "Unknown torrent plugin error.");
+  console.error(`[torrent-stream] ${text}`);
+  core.osd(text);
 }
 
 function extractLastLogLine(text, pattern) {

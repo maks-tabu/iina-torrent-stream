@@ -40,9 +40,10 @@ Restart IINA after linking.
 ## Usage
 
 1. Open a `.torrent` file in IINA, or open a `magnet:` URL.
-2. Plugin starts `webtorrent` in background.
-3. If torrent has multiple videos, open plugin menu and pick needed file.
-4. When local stream URL appears, plugin switches playback to that stream.
+2. If the torrent has multiple videos, select an episode in the panel. Use the
+   search field to filter by a name such as `s01e05`.
+3. The plugin starts `webtorrent` for the selected file only.
+4. When the local stream is ready, IINA starts playback automatically.
 
 ## Notes
 
